@@ -39,7 +39,7 @@ find ./maildir -maxdepth 2 -type f
 reveals 7 files that are directly under user's root folder. This means that email files need to be search recursively starting from user's
 root folder.
 
-There over 500k files in total (see `find . -type f | wc -l`).
+There over 500k files in total (see `find ./maildir -type f | wc -l`).
 
 
 ## Email files
@@ -294,3 +294,87 @@ Technical things that need to be done.
    block HTTP API requests. Don't write tests and ignore optimizations.
 8. Implement HTTP API endpoints detailed earlier. Don't write tests.
 
+
+## Initial implementation
+
+Prompt given to Claude:
+
+```
+Read the SPEC.md and implement basic version of the processor with Golang. Write unit tests for parsing EML files and the TAR file. Don't write integration tests or tests that require database.
+
+Make sure to read AGENTS.md
+```
+
+Claude pointed out few mistakes I made to test files (duplicate IDs and header fields). Fixed those manually and let it do its magic.
+
+Notes:
+
+- Code seems to be valid in eyes of a Java developer
+- One direct dependency added: https://pkg.go.dev/modernc.org/sqlite@v1.61.0
+- Go has built-in functions for parsing EML files
+- The [Dockerfile](../Dockerfile) is direct copy from https://docs.docker.com/guides/golang/#multi-stage-builds
+- Claude decided that users are `UPSERT`ed to the database which causes the name to update on every write. Not good.
+- Claude added extra index to the schema:
+
+```sql
+CREATE INDEX IF NOT EXISTS email_from_user_id ON email (from_user_id);
+```
+
+It should improve read times but may cause inserts to be slower. I will test this later.
+
+The first ingestion run took almost 10 minutes. Not good. While processor and memory was lightly utilized, IO's write usage was between
+4-6 MB/s. Hopefully the SQLite database isn't the bottleneck...
+
+Results:
+
+```
+message_count: 250703
+user_count: 87675
+sender_count: 20326
+messages_processed: 517401
+processing_errors: 27
+duplicates_ignored: 266671
+time_took: 582575
+```
+
+51 % of messages were marked as duplicates. 🤯
+
+The amount of senders is also huge. It's something worth of investigating because the archive has only 150 user folders...
+
+All of 27 errors were because of malformed header lines. I'm not going to write fix for these because it's such small amount and I'm not
+building the perfect processor. The underlying error is coming from built-in `mail.ReadMessage` function.
+
+```
+file=maildir/whalley-g/calendar/142. error="read headers: malformed header line: \"(Maureen x31808)\""
+file=maildir/whalley-g/calendar/139. error="read headers: malformed header line: \"Leslie Rich, VP & Doris Kelly Waltkins, SVP, Portfolio Mgrs w/\""
+file=maildir/whalley-g/calendar/128. error="read headers: malformed header line: \"Oachim Emanuelsson, VP - Europe of Kiodex\""
+file=maildir/whalley-g/test/calendar/79. error="read headers: malformed header line: \"Oachim Emanuelsson, VP - Europe of Kiodex\""
+file=maildir/whalley-g/test/calendar/90. error="read headers: malformed header line: \"Leslie Rich, VP & Doris Kelly Waltkins, SVP, Portfolio Mgrs w/\""
+file=maildir/whalley-g/test/calendar/93. error="read headers: malformed header line: \"(Maureen x31808)\""
+file=maildir/lenhart-m/deleted_items/351. error="read headers: malformed header line: \"!\""
+file=maildir/schwieger-j/calendar/3. error="read headers: malformed header line: \"EB35c1\""
+file=maildir/schwieger-j/calendar/4. error="read headers: malformed header line: \"EB32c2\""
+file=maildir/schwieger-j/calendar/6. error="read headers: malformed header line: \"(Lavorato's office)\""
+file=maildir/schwieger-j/calendar/2. error="read headers: malformed header line: \"EB24c2\""
+file=maildir/schwieger-j/calendar/1. error="read headers: malformed header line: \"EB3270\""
+file=maildir/zipper-a/calendar/23. error="read headers: malformed header line: \"Trading on EOL\""
+file=maildir/haedicke-m/calendar/37. error="read headers: malformed header line: \"Mark's Office - EB3325\""
+file=maildir/kitchen-l/calendar/35. error="read headers: malformed header line: \"Your office (Jessica Ramiez)\""
+file=maildir/lokey-t/calendar/28. error="read headers: malformed header line: \"Ned, Tess and Alice\""
+file=maildir/kaminski-v/calendar/40. error="read headers: malformed header line: \"Pre-interview reception - Cindy Justice\""
+file=maildir/geaccone-t/inbox/537. error="read headers: malformed header line: \"?\""
+file=maildir/hendrickson-s/deleted_items/67. error="read headers: malformed header line: \"!\""
+file=maildir/baughman-d/calendar/19. error="read headers: malformed header line: \"Friday, September 21st\""
+file=maildir/baughman-d/calendar/4. error="read headers: malformed header line: \"Wednesday,  September 19th\""
+file=maildir/baughman-d/calendar/5. error="read headers: malformed header line: \"Interconnect\\\"\""
+file=maildir/baughman-d/deleted_items/303. error="read headers: malformed header line: \"1. Mom &dad\""
+file=maildir/baughman-d/tasks/4. error="read headers: malformed header line: \"1. Mom &dad\""
+file=maildir/sager-e/calendar/34. error="read headers: malformed header line: \"Statute of Limitations\""
+file=maildir/kuykendall-t/deleted_items/22. error="read headers: malformed header line: \"!\""
+file=maildir/campbell-l/inbox/1040. error="read headers: malformed header line: \"?\""
+```
+
+API endpoints worked as planned. The top sender returned by the API is "Jeff Dasovich" (`jeff.dasovich(at)enron.com`) with 5498 messages
+sent.
+
+Next up: more speed.
