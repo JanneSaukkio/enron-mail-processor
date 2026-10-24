@@ -512,3 +512,27 @@ Claude run some extra tests with `go tool pprof` command and came to following c
 >busy for nearly the whole run while the reader and parsers wait on it.
 
 Running performance tests take now **7.8 seconds**.
+
+
+## In-memory database
+
+Ingestion the whole dataset now takes 1 minute and 7 seconds. If Claude is to believed, bulk of time is used to write rows to the database.
+Modern storage devices are fast but in-memory databases will always be faster but volatile. Data is gone once process is stopped.
+
+Ingestion results require 100.7 MiB of disk space, same amount of RAM is expected to be used with in-memory database.
+
+Instructed Claude to modify the `--db` flag:
+
+>Modify `db` flag so that it accepts string "memory" and when such value is given, SQLite database is in-memory.
+
+Comparing RAM usages when idle and after the ingestion reveal what it costs to improve the ingestion speed by 41%.
+
+| Storage | Idle RAM usage  | Peak RAM usage    | Time |
+| ------- | --------------- | ----------------- | ---- |
+| Disk    | 7 MiB           | 175 MiB           | 67s  |
+| Memory  | 15 MiB          | 294 MiB           | 39s  |
+
+CPU usage was slightly higher in my observations when using in-memory database. Not a bottleneck though.
+
+Setting `--db memory` flag reduces time taken to ingest files to 39 seconds.
+
