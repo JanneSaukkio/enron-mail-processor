@@ -106,12 +106,27 @@ func (m *Message) addNames(addrs, names []string) {
 func splitAddresses(s string) []string {
 	var out []string
 	for _, part := range strings.Split(s, ",") {
-		part = strings.ToLower(strings.TrimSpace(part))
-		if part != "" {
-			out = append(out, part)
+		if addr := cleanAddress(part); addr != "" {
+			out = append(out, addr)
 		}
 	}
 	return out
+}
+
+// cleanAddress normalizes a single address. Some addresses in the dataset are
+// mangled, such as "cater'.'john@enron.com" or "e-mail <'.'john@enron.com>":
+// a display prefix and brackets are dropped and the quoted dot is unquoted.
+// A quoted local part, as in `"fichter.john"@enron.com`, is unquoted so that
+// it matches the plain form of the same address.
+func cleanAddress(s string) string {
+	s = strings.TrimSpace(s)
+	if i, j := strings.Index(s, "<"), strings.LastIndex(s, ">"); i >= 0 && j > i {
+		s = strings.TrimSpace(s[i+1 : j])
+	}
+	s = strings.ReplaceAll(s, "'.'", ".")
+	s = strings.TrimPrefix(s, `"`)
+	s = strings.Replace(s, `"@`, "@", 1)
+	return strings.ToLower(strings.TrimSpace(s))
 }
 
 // splitNames splits a X-From/X-To/X-cc/X-bcc header into display names.

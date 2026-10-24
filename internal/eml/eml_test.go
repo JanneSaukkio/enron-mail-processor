@@ -3,6 +3,7 @@ package eml
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -138,6 +139,57 @@ func TestParseNamesWithMismatchedCount(t *testing.T) {
 	}
 	if got := msg.Name("nobody@enron.com"); got != "" {
 		t.Errorf("Name(unknown) = %q, want empty", got)
+	}
+}
+
+func TestCleanAddress(t *testing.T) {
+	tests := []struct {
+		in, want string
+	}{
+		{"john.doe@enron.com", "john.doe@enron.com"},
+		{"  John.Doe@Enron.com ", "john.doe@enron.com"},
+		{"cater'.'john@enron.com", "cater.john@enron.com"},
+		{"e-mail <'.'john@enron.com>", ".john@enron.com"},
+		{"<john.doe@enron.com>", "john.doe@enron.com"},
+		{`<"fichter.john"@enron.com>`, "fichter.john@enron.com"},
+		{`"fichter.john"@enron.com`, "fichter.john@enron.com"},
+		{`"fichter.john@enron.com`, "fichter.john@enron.com"},
+		{`fichter.john"@enron.com`, "fichter.john@enron.com"},
+		{`fichter."john".x@enron.com`, `fichter."john".x@enron.com`},
+		{`fichter.john@"enron".com`, `fichter.john@"enron".com`},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			if got := cleanAddress(tt.in); got != tt.want {
+				t.Errorf("cleanAddress(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseCleansAddresses(t *testing.T) {
+	const input = "Message-ID: <1@x>\nDate: Mon, 14 May 2001 16:39:00 -0700 (PDT)\n" +
+		"From: e-mail <'.'john@enron.com>\n" +
+		"To: cater'.'john@enron.com, e-mail <'.'john@enron.com>\n" +
+		"Cc: cater'.'john@enron.com\nBcc: e-mail <'.'john@enron.com>\n\nbody\n"
+
+	msg, err := Parse(strings.NewReader(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if want := ".john@enron.com"; msg.From != want {
+		t.Errorf("From = %q, want %q", msg.From, want)
+	}
+	if want := []string{"cater.john@enron.com", ".john@enron.com"}; !slices.Equal(msg.To, want) {
+		t.Errorf("To = %q, want %q", msg.To, want)
+	}
+	if want := []string{"cater.john@enron.com"}; !slices.Equal(msg.Cc, want) {
+		t.Errorf("Cc = %q, want %q", msg.Cc, want)
+	}
+	if want := []string{".john@enron.com"}; !slices.Equal(msg.Bcc, want) {
+		t.Errorf("Bcc = %q, want %q", msg.Bcc, want)
 	}
 }
 
