@@ -402,3 +402,43 @@ Which is correct. More than half the files are duplicates. The more interesting 
 
 I speculated that this could be problem earlier in "Optimizations" section and proposed same fix. It's time to implement it.
 
+### Sidenote about email addresses
+
+Looking data in the `user` table, there are loads of near duplicates such as:
+
+- `cater'.'john@enron.com`
+- `cater.john@enron.com`
+- `'.''john@enron.com`
+- `'.'john@enron.com`
+- `e-mail <'.'john@enron.com>`
+
+There 1919 email addresses stored in the database that contain `'.'` ("escaped" dot). Verified with following query:
+
+```sql
+select u.email, u.name
+from user u
+where u.email like '%''.''%';
+```
+
+This is likely a problem because there are estimated amount of over 2000 emails containing sender with "escaped" dot:
+
+```sql
+select u.email, COUNT(*) sent
+from email e
+join recipient r on e.id = r.email_id
+join user u on u.id = r.user_id
+where r.type is null and u.email like '%''.''%'
+group by u.id
+order by sent desc;
+```
+
+I instructed Claude to clean addresses in EML parser:
+
+>Following email addresses should be cleaned in EML parser:
+>1. `cater'.'john@enron.com` becomes `cater.john@enron.com` (replace `'.'` with dot)
+>2. `e-mail <'.'john@enron.com>` becomes `.john@enron.com` (remove brackets and "e-mail" prefix)
+>3. `<"fichter.john"@enron.com>` becomes `fichter.john@enron.com` (strip double quotes around username part)
+>
+>Write tests for these cases.
+
+There are most likely more email addresses that require cleanup but I don't have time to investigate further.
