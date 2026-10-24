@@ -456,3 +456,28 @@ Response:
 
 Using simple cache for users is as effective as though earlier. Speed improvements scale and processing the whole archive now tooks slightly
 over 2 minutes.
+
+## Bulk inserting recipients
+
+I noticed that in the `saveMessage` method of [sqlite.go](../internal/store/sqlite.go) recipients are inserted one-by-one to the table. This
+is slow for cases where there are tens of rows to be added. Instructing Claude to investigate and fix:
+
+>Does gosqlite support batch inserts? It would be much efficient in cases where message has tens of recipients. If so use bulk inserts in
+>`saveMessage` method when inserting recipients.
+
+My hunch was almost correct; bulk inserts are faster but Claude proposed using even better solution: prepared statements with single
+inserts. SQL statements are prepared at the start of the transaction and closed at the end.
+
+Results of performance tests:
+
+- **Before**: 15.7 s
+- **Prepared statements**: 10.8 s
+- **Prepared statements + bulk insert**: 11.8 s
+
+Reason for bulk inserts being slower:
+
+>The bulk insert was slower because its SQL text depends on how many recipients a message has. SQLite therefore has to parse a new statement
+>for nearly every message, and it can't reuse the prepared single-row insert. In SQLite, which runs inside the process, inserting one row is
+>cheap.
+
+Running whole dataset now takes less than 2 minutes.
