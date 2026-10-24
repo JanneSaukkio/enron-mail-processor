@@ -107,8 +107,13 @@ type Stats struct {
 	Senders  int64
 }
 
+// Memory is the path that makes Open use an in-memory database. Its data is
+// lost when the Store is closed.
+const Memory = "memory"
+
 // Open opens or creates the database at path and initializes the schema.
-// When clean is true, existing tables are dropped first.
+// When clean is true, existing tables are dropped first. When path is Memory,
+// the database is kept in memory.
 func Open(ctx context.Context, path string, clean bool) (*Store, error) {
 	// The driver runs each _pragma on every new connection. That matters
 	// because database/sql keeps a pool of connections and most pragmas only
@@ -132,13 +137,26 @@ func Open(ctx context.Context, path string, clean bool) (*Store, error) {
 	//     a batch transaction outgrows the cache and SQLite writes pages to
 	//     the WAL in the middle of it. The larger cache cut ingestion time of
 	//     the performance test dataset by about 8%.
-	dsn := "file:" + path +
+	file := path
+	if path == Memory {
+		file = ":memory:"
+	}
+	dsn := "file:" + file +
 		"?_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)" +
 		"&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)" +
 		"&_pragma=cache_size(-65536)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
+	}
+	if path == Memory {
+		// Every connection to :memory: gets a separate, empty database, so
+		// the pool is limited to one connection that is never closed. API
+		// queries wait for the writer to commit its current batch.
+		db.SetMaxOpenConns(1)
+		db.SetMaxIdleConns(1)
+		db.SetConnMaxLifetime(0)
+		db.SetConnMaxIdleTime(0)
 	}
 
 	if clean {

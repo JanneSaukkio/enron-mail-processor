@@ -61,15 +61,23 @@ non-root (uid 65532), so the directory must be writable by that user.
 
 ## Parameters
 
-| Flag        | Default                        | Description                                                        |
-| ----------- | ------------------------------ | ------------------------------------------------------------------ |
-| `--path`    | `./enron_mail_20150507.tar.gz` | Path to the archive. The application exits if it does not exist.   |
-| `--clean`   | `false`                        | Drop and recreate the database schema on startup.                  |
-| `--results` | `true`                         | Write `results.txt` to the working directory after each ingestion. |
-| `--db`      | `./enron.db`                   | Path to the SQLite database.                                       |
-| `--addr`    | `:8080`                        | HTTP listen address.                                               |
+| Flag        | Default                        | Description                                                         |
+| ----------- | ------------------------------ | ------------------------------------------------------------------- |
+| `--path`    | `./enron_mail_20150507.tar.gz` | Path to the archive. The application exits if it does not exist.    |
+| `--clean`   | `false`                        | Drop and recreate the database schema on startup.                   |
+| `--results` | `true`                         | Write `results.txt` to the working directory after each ingestion.  |
+| `--db`      | `./enron.db`                   | Path to the SQLite database, or `memory` for an in-memory database. |
+| `--addr`    | `:8080`                        | HTTP listen address.                                                |
 
 Boolean flags take a value with `=`, for example `--results=false`.
+
+### In-memory database
+
+With `--db memory` the database is kept in memory instead of a file. Nothing is written to disk except `results.txt`, and all
+data is lost when the application stops. `--clean` has no effect because the database always starts empty.
+
+An in-memory database uses a single connection, so API requests made during ingestion wait until the current batch of
+messages has been committed.
 
 ## API
 
