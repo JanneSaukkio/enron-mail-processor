@@ -64,6 +64,21 @@ type Store struct {
 	db      *sql.DB
 	tx      *sql.Tx
 	pending int
+
+	// users caches user ids by email so that known users are not upserted
+	// again for every message.
+	users map[string]cachedUser
+	// uncommitted lists the cache entries written in the current
+	// transaction. They are dropped if the transaction or the message
+	// savepoint is rolled back, since their rows no longer exist.
+	uncommitted []string
+}
+
+type cachedUser struct {
+	id int64
+	// named tells whether a name has been stored. An unnamed user is
+	// upserted again when a message carries their name.
+	named bool
 }
 
 // Sender is a user together with the number of messages they have sent.
@@ -102,7 +117,7 @@ func Open(ctx context.Context, path string, clean bool) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("create schema: %w", err)
 	}
-	return &Store{db: db}, nil
+	return &Store{db: db, users: make(map[string]cachedUser)}, nil
 }
 
 // Close commits pending writes and closes the database.
@@ -127,8 +142,10 @@ func (s *Store) SaveMessage(ctx context.Context, msg *eml.Message) (inserted boo
 	if _, err := s.tx.ExecContext(ctx, "SAVEPOINT message"); err != nil {
 		return false, fmt.Errorf("savepoint: %w", err)
 	}
+	mark := len(s.uncommitted)
 	inserted, err = s.saveMessage(ctx, msg)
 	if err != nil {
+		s.forgetUsers(mark)
 		_, rbErr := s.tx.ExecContext(ctx, "ROLLBACK TO message; RELEASE message")
 		return false, errors.Join(err, rbErr)
 	}
@@ -194,11 +211,27 @@ func (s *Store) saveMessage(ctx context.Context, msg *eml.Message) (bool, error)
 }
 
 func (s *Store) userID(ctx context.Context, msg *eml.Message, addr string) (int64, error) {
+	name := msg.Name(addr)
+	if u, ok := s.users[addr]; ok && (u.named || name == "") {
+		return u.id, nil
+	}
+
 	var id int64
-	if err := s.tx.QueryRowContext(ctx, upsertUser, addr, msg.Name(addr)).Scan(&id); err != nil {
+	if err := s.tx.QueryRowContext(ctx, upsertUser, addr, name).Scan(&id); err != nil {
 		return 0, fmt.Errorf("upsert user %q: %w", addr, err)
 	}
+	s.users[addr] = cachedUser{id: id, named: name != ""}
+	s.uncommitted = append(s.uncommitted, addr)
 	return id, nil
+}
+
+// forgetUsers drops cache entries written since uncommitted had length mark.
+// A dropped user is looked up from the database again when next seen.
+func (s *Store) forgetUsers(mark int) {
+	for _, addr := range s.uncommitted[mark:] {
+		delete(s.users, addr)
+	}
+	s.uncommitted = s.uncommitted[:mark]
 }
 
 // Flush commits the current batch.
@@ -210,8 +243,10 @@ func (s *Store) Flush() error {
 	s.tx = nil
 	s.pending = 0
 	if err != nil {
+		s.forgetUsers(0)
 		return fmt.Errorf("commit: %w", err)
 	}
+	s.uncommitted = s.uncommitted[:0]
 	return nil
 }
 
