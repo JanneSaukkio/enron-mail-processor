@@ -442,3 +442,17 @@ I instructed Claude to clean addresses in EML parser:
 >Write tests for these cases.
 
 There are most likely more email addresses that require cleanup but I don't have time to investigate further.
+
+## Caching user IDs in memory
+
+Prompt:
+
+>Cache IDs of inserted users by email in memory so that inserting rows to the email table doesn't need upsert users to the database.
+
+Response:
+
+>User ids are now cached in memory, and the performance test ran in 15.7 s instead of 69.7 s, about 4.4× faster. That works out to roughly
+>2 minutes for the full archive
+
+Using simple cache for users is as effective as though earlier. Speed improvements scale and processing the whole archive now tooks slightly
+over 2 minutes.
