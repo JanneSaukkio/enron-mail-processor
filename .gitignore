@@ -1,0 +1,4 @@
+# Ignore the dataset
+/docs/*.tar.gz
+/docs/maildir
+WORKLOG.md
