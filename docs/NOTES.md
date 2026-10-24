@@ -536,3 +536,12 @@ CPU usage was slightly higher in my observations when using in-memory database. 
 
 Setting `--db memory` flag reduces time taken to ingest files to 39 seconds.
 
+
+## Dropping recipients
+
+Storing recipients was not something that was required to do. It was something that I wanted. Not saving the recipients makes whole
+ingestion take 34 seconds with in-memory database.
+
+Instructed Claude with following:
+
+>Remove parsing and storing recipients all together from everywhere
