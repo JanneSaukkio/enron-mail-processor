@@ -481,3 +481,34 @@ Reason for bulk inserts being slower:
 >cheap.
 
 Running whole dataset now takes less than 2 minutes.
+
+
+## Multithreading
+
+There might be chance to execute some of the ingestion work in parallel. Let Claude investigate:
+
+>Modify the ingestion to run on multiple threads/goroutines to speed up the processing. SQLite supports multihreading out-of-the box but may
+>require some logic on top.
+>
+>Compare time taken using performance tests. Currently it takes ~11 seconds to ingest the test dataset.
+
+Response:
+
+>Only parsing can run in parallel—TAR decompression is sequential by nature and SQLite allows just one writer. I'll build a pipeline (one
+>reader, a parser pool, one writer) so parsing overlaps with I/O
+
+Didn't know that SQLite only allows one writer but it makes sense because it's much simpler to implement; there cannot be conflicts.
+
+However parallelizing EML file parsing shaves off around 3 seconds from the performance test.
+
+>SaveMessage is now the bottleneck at 7.0s CPU of the 8.1s run, outweighing the reader and parsers. About 1.7s of writer time is spent on
+>`pwrite` calls mid-transaction, suggesting SQLite's default 2MB page cache is overflowing and flushing to the WAL early.
+
+Increasing the SQLite connection's `cache_size` 64 MB shaves off half a second by reducing write-ahead-log flushes.
+
+Claude run some extra tests with `go tool pprof` command and came to following conclusion:
+
+>SaveMessage is now the bottleneck at 7.0s CPU of the 8.1s run, outweighing the reader and parsers. So the writer is now the limit: it's
+>busy for nearly the whole run while the reader and parsers wait on it.
+
+Running performance tests take now **7.8 seconds**.
