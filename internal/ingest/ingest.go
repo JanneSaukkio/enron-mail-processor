@@ -2,11 +2,13 @@
 package ingest
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -36,6 +38,9 @@ type Config struct {
 	// ResultsPath is where results are written after each run. Empty
 	// disables writing results.
 	ResultsPath string
+	// Workers is the number of goroutines parsing messages. Zero uses
+	// GOMAXPROCS.
+	Workers int
 }
 
 // Service runs at most one ingestion at a time in the background.
@@ -118,7 +123,7 @@ func (s *Service) run(startedAt time.Time) {
 		s.finish(startedAt)
 	}()
 
-	err := archive.Walk(s.ctx, s.cfg.ArchivePath, s.processFile)
+	err := s.ingest()
 	if flushErr := s.store.Flush(); flushErr != nil && err == nil {
 		err = flushErr
 	}
@@ -127,27 +132,90 @@ func (s *Service) run(startedAt time.Time) {
 	}
 }
 
-// processFile handles one archive entry. Errors in a single file are counted
-// and never stop the ingestion.
-func (s *Service) processFile(name string, r io.Reader) error {
-	defer s.processed.Add(1)
+type file struct {
+	name string
+	data []byte
+}
 
-	msg, err := eml.Parse(r)
-	if err != nil {
-		s.errors.Add(1)
-		s.logger.Warn("parse message", "file", name, "error", err)
-		return nil
+type parsed struct {
+	name string
+	msg  *eml.Message
+	err  error
+}
+
+// ingest runs a pipeline of one archive reader, a pool of parsers and one
+// writer. Reading the gzip stream is sequential and SQLite allows a single
+// writer only, so parsing is the stage that runs in parallel; the reader and
+// the writer overlap with it and each other.
+func (s *Service) ingest() error {
+	workers := s.cfg.Workers
+	if workers <= 0 {
+		workers = runtime.GOMAXPROCS(0)
 	}
 
-	inserted, err := s.store.SaveMessage(s.ctx, msg)
+	files := make(chan file, workers*2)
+	results := make(chan parsed, workers*2)
+
+	var walkErr error
+	go func() {
+		defer close(files)
+		walkErr = archive.Walk(s.ctx, s.cfg.ArchivePath, func(name string, r io.Reader) error {
+			data, err := io.ReadAll(r)
+			if err != nil {
+				return err
+			}
+			select {
+			case files <- file{name, data}:
+				return nil
+			case <-s.ctx.Done():
+				return s.ctx.Err()
+			}
+		})
+	}()
+
+	var parsers sync.WaitGroup
+	for range workers {
+		parsers.Go(func() {
+			for f := range files {
+				msg, err := eml.Parse(bytes.NewReader(f.data))
+				results <- parsed{f.name, msg, err}
+			}
+		})
+	}
+	go func() {
+		parsers.Wait()
+		close(results)
+	}()
+
+	// The writer drains results until the parsers are done, so that the
+	// pipeline never blocks, even when the context is cancelled.
+	for r := range results {
+		s.save(r)
+	}
+
+	// results is closed only after files is closed, so walkErr is set.
+	return walkErr
+}
+
+// save stores one parsed file. Errors in a single file are counted and never
+// stop the ingestion.
+func (s *Service) save(r parsed) {
+	defer s.processed.Add(1)
+
+	if r.err != nil {
+		s.errors.Add(1)
+		s.logger.Warn("parse message", "file", r.name, "error", r.err)
+		return
+	}
+
+	inserted, err := s.store.SaveMessage(s.ctx, r.msg)
 	switch {
 	case err != nil:
 		s.errors.Add(1)
-		s.logger.Warn("save message", "file", name, "error", err)
+		s.logger.Warn("save message", "file", r.name, "error", err)
 	case !inserted:
 		s.duplicates.Add(1)
 	}
-	return nil
 }
 
 func (s *Service) finish(startedAt time.Time) {
