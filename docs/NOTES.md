@@ -378,3 +378,27 @@ API endpoints worked as planned. The top sender returned by the API is "Jeff Das
 sent.
 
 Next up: more speed.
+
+
+## Testing performance
+
+I could manually test how long file ingestion takes but it would be a waste of my time. Instead Go should test the performance using
+built-in tools.
+
+I created a subset TAR archive containin around 70k files from top three senders: `jeff.dasovich`, `kay.mann` and `sara.shackleton` and
+tasked Claude to write performance tests:
+
+>Write a performance test that ingests test/perf-test-dataset.tar.gz archive. It has 3 user folders and 70k files.
+
+Response:
+
+>I added a performance test in [perf_test.go](../internal/ingest/perf_test.go), and it passes. It ingested all 70,302 files in 1 min 10 s,
+>about 1,000 files per second. At this rate the full 517k-file archive would take about 8–9 minutes.
+
+Which is correct. More than half the files are duplicates. The more interesting part was this:
+
+>The likely cause is that every sender and recipient address gets its own SQL statement, and the cc example alone has over 100 addresses.
+>Caching user ids in memory and preparing statements once should help a lot ...
+
+I speculated that this could be problem earlier in "Optimizations" section and proposed same fix. It's time to implement it.
+
