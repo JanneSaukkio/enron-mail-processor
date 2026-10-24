@@ -27,17 +27,10 @@ CREATE TABLE IF NOT EXISTS email (
     hash TEXT NOT NULL UNIQUE
 );
 
-CREATE TABLE IF NOT EXISTS recipient (
-    email_id INTEGER NOT NULL REFERENCES email (id),
-    user_id INTEGER NOT NULL REFERENCES user (id),
-    type TEXT
-);
-
 CREATE INDEX IF NOT EXISTS email_from_user_id ON email (from_user_id);
 `
 
 const dropSchema = `
-DROP TABLE IF EXISTS recipient;
 DROP TABLE IF EXISTS email;
 DROP TABLE IF EXISTS user;
 `
@@ -50,8 +43,6 @@ ON CONFLICT (email) DO UPDATE SET name = CASE WHEN user.name = '' THEN excluded.
 RETURNING id`
 
 const insertEmail = `INSERT OR IGNORE INTO email (message_id, date, from_user_id, hash) VALUES (?, ?, ?, ?)`
-
-const insertRecipient = `INSERT INTO recipient (email_id, user_id, type) VALUES (?, ?, ?)`
 
 // batchSize is the number of messages written per transaction. Committing
 // every message separately would make ingestion of the full dataset slow.
@@ -78,11 +69,10 @@ type Store struct {
 // txStmts are the statements run for every message, prepared once per
 // transaction to avoid parsing the SQL again for each row.
 type txStmts struct {
-	savepoint       *sql.Stmt
-	release         *sql.Stmt
-	upsertUser      *sql.Stmt
-	insertEmail     *sql.Stmt
-	insertRecipient *sql.Stmt
+	savepoint   *sql.Stmt
+	release     *sql.Stmt
+	upsertUser  *sql.Stmt
+	insertEmail *sql.Stmt
 }
 
 type cachedUser struct {
@@ -177,8 +167,8 @@ func (s *Store) Close() error {
 	return errors.Join(s.Flush(), s.db.Close())
 }
 
-// SaveMessage stores the users of msg and, unless it is a duplicate, the
-// message and its recipients. It reports whether the message was inserted.
+// SaveMessage stores the sender of msg and, unless it is a duplicate, the
+// message. It reports whether the message was inserted.
 // A failed message is rolled back without affecting the rest of the batch.
 func (s *Store) SaveMessage(ctx context.Context, msg *eml.Message) (inserted bool, err error) {
 	// A cancelled context would roll back the whole batch. Writing a single
@@ -231,7 +221,6 @@ func (s *Store) begin(ctx context.Context) error {
 		{&stmts.release, "RELEASE message"},
 		{&stmts.upsertUser, upsertUser},
 		{&stmts.insertEmail, insertEmail},
-		{&stmts.insertRecipient, insertRecipient},
 	} {
 		if *p.stmt, err = tx.PrepareContext(ctx, p.query); err != nil {
 			return errors.Join(fmt.Errorf("prepare %q: %w", p.query, err), tx.Rollback())
@@ -243,55 +232,23 @@ func (s *Store) begin(ctx context.Context) error {
 }
 
 func (s *Store) saveMessage(ctx context.Context, msg *eml.Message) (bool, error) {
-	fromID, err := s.userID(ctx, msg, msg.From)
+	fromID, err := s.userID(ctx, msg.From, msg.FromName)
 	if err != nil {
 		return false, err
-	}
-
-	type recipient struct {
-		userID int64
-		typ    sql.NullString
-	}
-	var recipients []recipient
-	for _, group := range []struct {
-		addrs []string
-		typ   sql.NullString
-	}{
-		{msg.To, sql.NullString{}},
-		{msg.Cc, sql.NullString{String: "cc", Valid: true}},
-		{msg.Bcc, sql.NullString{String: "bcc", Valid: true}},
-	} {
-		for _, addr := range group.addrs {
-			id, err := s.userID(ctx, msg, addr)
-			if err != nil {
-				return false, err
-			}
-			recipients = append(recipients, recipient{id, group.typ})
-		}
 	}
 
 	res, err := s.stmts.insertEmail.ExecContext(ctx, msg.MessageID, msg.Date.UnixMilli(), fromID, msg.Hash())
 	if err != nil {
 		return false, fmt.Errorf("insert email: %w", err)
 	}
-	if n, err := res.RowsAffected(); err != nil || n == 0 {
-		return false, err
-	}
-	emailID, err := res.LastInsertId()
+	n, err := res.RowsAffected()
 	if err != nil {
-		return false, fmt.Errorf("email id: %w", err)
+		return false, fmt.Errorf("email rows affected: %w", err)
 	}
-
-	for _, r := range recipients {
-		if _, err := s.stmts.insertRecipient.ExecContext(ctx, emailID, r.userID, r.typ); err != nil {
-			return false, fmt.Errorf("insert recipient: %w", err)
-		}
-	}
-	return true, nil
+	return n > 0, nil
 }
 
-func (s *Store) userID(ctx context.Context, msg *eml.Message, addr string) (int64, error) {
-	name := msg.Name(addr)
+func (s *Store) userID(ctx context.Context, addr, name string) (int64, error) {
 	if u, ok := s.users[addr]; ok && (u.named || name == "") {
 		return u.id, nil
 	}

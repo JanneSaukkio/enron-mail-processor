@@ -64,7 +64,7 @@ non-root (uid 65532), so the directory must be writable by that user.
 | Flag        | Default                        | Description                                                         |
 | ----------- | ------------------------------ | ------------------------------------------------------------------- |
 | `--path`    | `./enron_mail_20150507.tar.gz` | Path to the archive. The application exits if it does not exist.    |
-| `--clean`   | `false`                        | Drop and recreate the database schema on startup.                   |
+| `--clean`   | `true`                         | Drop and recreate the database schema on startup.                   |
 | `--results` | `true`                         | Write `results.txt` to the working directory after each ingestion.  |
 | `--db`      | `./enron.db`                   | Path to the SQLite database, or `memory` for an in-memory database. |
 | `--addr`    | `:8080`                        | HTTP listen address.                                                |

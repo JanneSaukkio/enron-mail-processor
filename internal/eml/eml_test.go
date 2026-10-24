@@ -35,7 +35,6 @@ func TestParseFiles(t *testing.T) {
 		lastTo    string
 		ccLen     int
 		bccLen    int
-		names     map[string]string
 	}{
 		{
 			file:      "test-email.eml",
@@ -46,7 +45,6 @@ func TestParseFiles(t *testing.T) {
 			toLen:     1,
 			firstTo:   "pallen@enron.com",
 			lastTo:    "pallen@enron.com",
-			names:     map[string]string{"pallen@enron.com": "pallen@enron.com"},
 		},
 		{
 			file:      "test-email-cc.eml",
@@ -59,12 +57,6 @@ func TestParseFiles(t *testing.T) {
 			lastTo:    "claudia.meraz@enron.com",
 			ccLen:     6,
 			bccLen:    6,
-			names: map[string]string{
-				"alan.aronowitz@enron.com":  "Alan Aronowitz",
-				"sandi.braband@enron.com":   "Sandi M Braband",
-				"gary.bode@enron.com":       "Gary Bode",
-				"stephanie.truss@enron.com": "Stephanie Truss",
-			},
 		},
 		{
 			file:      "test-email-bcc.eml",
@@ -76,11 +68,6 @@ func TestParseFiles(t *testing.T) {
 			firstTo:   "harry.woodson@enron.com",
 			lastTo:    "bradley.holmes@enron.com",
 			bccLen:    1,
-			names: map[string]string{
-				"harry.woodson@enron.com":  "Woodson, Harry",
-				"bradley.holmes@enron.com": "Holmes, Bradley",
-				"debra.scurlock@enron.com": "Scurlock, Debra",
-			},
 		},
 	}
 
@@ -97,48 +84,42 @@ func TestParseFiles(t *testing.T) {
 			if msg.From != tt.from {
 				t.Errorf("From = %q, want %q", msg.From, tt.from)
 			}
-			if got := msg.Name(msg.From); got != tt.fromName {
-				t.Errorf("Name(From) = %q, want %q", got, tt.fromName)
+			if msg.FromName != tt.fromName {
+				t.Errorf("FromName = %q, want %q", msg.FromName, tt.fromName)
 			}
-			if len(msg.To) != tt.toLen {
-				t.Fatalf("len(To) = %d, want %d", len(msg.To), tt.toLen)
+			if len(msg.to) != tt.toLen {
+				t.Fatalf("len(to) = %d, want %d", len(msg.to), tt.toLen)
 			}
-			if msg.To[0] != tt.firstTo || msg.To[len(msg.To)-1] != tt.lastTo {
-				t.Errorf("To = [%q ... %q], want [%q ... %q]", msg.To[0], msg.To[len(msg.To)-1], tt.firstTo, tt.lastTo)
+			if msg.to[0] != tt.firstTo || msg.to[len(msg.to)-1] != tt.lastTo {
+				t.Errorf("to = [%q ... %q], want [%q ... %q]", msg.to[0], msg.to[len(msg.to)-1], tt.firstTo, tt.lastTo)
 			}
-			if len(msg.Cc) != tt.ccLen {
-				t.Errorf("len(Cc) = %d, want %d", len(msg.Cc), tt.ccLen)
+			if len(msg.cc) != tt.ccLen {
+				t.Errorf("len(cc) = %d, want %d", len(msg.cc), tt.ccLen)
 			}
-			if len(msg.Bcc) != tt.bccLen {
-				t.Errorf("len(Bcc) = %d, want %d", len(msg.Bcc), tt.bccLen)
-			}
-			for addr, want := range tt.names {
-				if got := msg.Name(addr); got != want {
-					t.Errorf("Name(%q) = %q, want %q", addr, got, want)
-				}
+			if len(msg.bcc) != tt.bccLen {
+				t.Errorf("len(bcc) = %d, want %d", len(msg.bcc), tt.bccLen)
 			}
 		})
 	}
 }
 
-func TestParseNamesWithMismatchedCount(t *testing.T) {
-	const input = "Message-ID: <1@x>\nDate: Mon, 14 May 2001 16:39:00 -0700 (PDT)\n" +
-		"From: a@enron.com\nTo: b@enron.com, c@enron.com\nX-From: A\nX-To: B\n\nbody\n"
-	msg, err := Parse(strings.NewReader(input))
-	if err != nil {
-		t.Fatal(err)
+func TestParseName(t *testing.T) {
+	tests := []struct {
+		in, want string
+	}{
+		{"Janette Elbertson", "Janette Elbertson"},
+		{"Hottap HelpDesk </O=ENRON/OU=NA/CN=RECIPIENTS/CN=MBX_HOTTAPHD>", "Hottap HelpDesk"},
+		{"Allen, Phillip K. </O=ENRON/OU=NA/CN=RECIPIENTS/CN=Pallen>", "Allen, Phillip K."},
+		{`"pallen@enron.com" <pallen@enron.com>`, "pallen@enron.com"},
+		{"  ", ""},
+		{"", ""},
 	}
-	if got := msg.Name("a@enron.com"); got != "A" {
-		t.Errorf("Name(a) = %q, want %q", got, "A")
-	}
-	// Two addresses but one name: positions can't be trusted.
-	for _, addr := range msg.To {
-		if got := msg.Name(addr); got != "" {
-			t.Errorf("Name(%q) = %q, want empty", addr, got)
-		}
-	}
-	if got := msg.Name("nobody@enron.com"); got != "" {
-		t.Errorf("Name(unknown) = %q, want empty", got)
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			if got := parseName(tt.in); got != tt.want {
+				t.Errorf("parseName(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -182,14 +163,14 @@ func TestParseCleansAddresses(t *testing.T) {
 	if want := ".john@enron.com"; msg.From != want {
 		t.Errorf("From = %q, want %q", msg.From, want)
 	}
-	if want := []string{"cater.john@enron.com", ".john@enron.com"}; !slices.Equal(msg.To, want) {
-		t.Errorf("To = %q, want %q", msg.To, want)
+	if want := []string{"cater.john@enron.com", ".john@enron.com"}; !slices.Equal(msg.to, want) {
+		t.Errorf("to = %q, want %q", msg.to, want)
 	}
-	if want := []string{"cater.john@enron.com"}; !slices.Equal(msg.Cc, want) {
-		t.Errorf("Cc = %q, want %q", msg.Cc, want)
+	if want := []string{"cater.john@enron.com"}; !slices.Equal(msg.cc, want) {
+		t.Errorf("cc = %q, want %q", msg.cc, want)
 	}
-	if want := []string{".john@enron.com"}; !slices.Equal(msg.Bcc, want) {
-		t.Errorf("Bcc = %q, want %q", msg.Bcc, want)
+	if want := []string{".john@enron.com"}; !slices.Equal(msg.bcc, want) {
+		t.Errorf("bcc = %q, want %q", msg.bcc, want)
 	}
 }
 

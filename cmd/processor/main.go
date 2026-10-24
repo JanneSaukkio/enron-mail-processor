@@ -29,7 +29,7 @@ func main() {
 
 func run(logger *slog.Logger) error {
 	path := flag.String("path", "./enron_mail_20150507.tar.gz", "path to the archive file")
-	clean := flag.Bool("clean", false, "reinitialize the database schema")
+	clean := flag.Bool("clean", true, "reinitialize the database schema")
 	results := flag.Bool("results", true, "write results.txt after processing stops")
 	dbPath := flag.String("db", "./enron.db", `path to the SQLite database, or "`+store.Memory+`" for an in-memory database`)
 	addr := flag.String("addr", ":8080", "HTTP listen address")
