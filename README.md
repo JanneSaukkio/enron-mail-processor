@@ -18,6 +18,30 @@ Run unit tests:
 go test -race ./...
 ```
 
+### Performance tests
+
+The performance test ingests `test/perf-test-dataset.tar.gz` into a temporary SQLite database and reports the throughput. It is
+behind the `perf` build tag, so it is not run with the unit tests.
+
+The dataset is not in Git and must be created manually. It contains three user folders (about 70k files) taken from the full
+archive:
+
+```sh
+tar xzf enron_mail_20150507.tar.gz maildir/dasovich-j maildir/mann-k maildir/shackleton-s
+tar czf test/perf-test-dataset.tar.gz maildir/dasovich-j maildir/mann-k maildir/shackleton-s
+rm -r maildir
+```
+
+Run the test:
+
+```sh
+go test -tags perf -run TestIngestPerformance -v -count=1 -timeout 10m ./internal/ingest/
+```
+
+`-count=1` disables the Go test cache. Without it, a rerun replays the previous result instantly.
+
+The test is skipped if the dataset does not exist.
+
 ## Running inside Docker container
 
 Build the image:

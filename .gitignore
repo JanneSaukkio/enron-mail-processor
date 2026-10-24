@@ -1,6 +1,7 @@
 # Ignore the dataset
 /docs/*.tar.gz
 /docs/maildir
+/test/perf-test-dataset.tar.gz
 WORKLOG.md
 
 # Build artifact
