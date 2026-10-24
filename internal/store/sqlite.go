@@ -63,6 +63,7 @@ const batchSize = 1000
 type Store struct {
 	db      *sql.DB
 	tx      *sql.Tx
+	stmts   txStmts
 	pending int
 
 	// users caches user ids by email so that known users are not upserted
@@ -72,6 +73,16 @@ type Store struct {
 	// transaction. They are dropped if the transaction or the message
 	// savepoint is rolled back, since their rows no longer exist.
 	uncommitted []string
+}
+
+// txStmts are the statements run for every message, prepared once per
+// transaction to avoid parsing the SQL again for each row.
+type txStmts struct {
+	savepoint       *sql.Stmt
+	release         *sql.Stmt
+	upsertUser      *sql.Stmt
+	insertEmail     *sql.Stmt
+	insertRecipient *sql.Stmt
 }
 
 type cachedUser struct {
@@ -134,12 +145,12 @@ func (s *Store) SaveMessage(ctx context.Context, msg *eml.Message) (inserted boo
 	ctx = context.WithoutCancel(ctx)
 
 	if s.tx == nil {
-		if s.tx, err = s.db.BeginTx(ctx, nil); err != nil {
-			return false, fmt.Errorf("begin transaction: %w", err)
+		if err := s.begin(ctx); err != nil {
+			return false, err
 		}
 	}
 
-	if _, err := s.tx.ExecContext(ctx, "SAVEPOINT message"); err != nil {
+	if _, err := s.stmts.savepoint.ExecContext(ctx); err != nil {
 		return false, fmt.Errorf("savepoint: %w", err)
 	}
 	mark := len(s.uncommitted)
@@ -149,7 +160,7 @@ func (s *Store) SaveMessage(ctx context.Context, msg *eml.Message) (inserted boo
 		_, rbErr := s.tx.ExecContext(ctx, "ROLLBACK TO message; RELEASE message")
 		return false, errors.Join(err, rbErr)
 	}
-	if _, err := s.tx.ExecContext(ctx, "RELEASE message"); err != nil {
+	if _, err := s.stmts.release.ExecContext(ctx); err != nil {
 		return false, fmt.Errorf("release savepoint: %w", err)
 	}
 
@@ -160,6 +171,34 @@ func (s *Store) SaveMessage(ctx context.Context, msg *eml.Message) (inserted boo
 		}
 	}
 	return inserted, nil
+}
+
+// begin starts a transaction and prepares the per-message statements in it.
+// The statements are closed when the transaction ends.
+func (s *Store) begin(ctx context.Context) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+
+	var stmts txStmts
+	for _, p := range []struct {
+		stmt  **sql.Stmt
+		query string
+	}{
+		{&stmts.savepoint, "SAVEPOINT message"},
+		{&stmts.release, "RELEASE message"},
+		{&stmts.upsertUser, upsertUser},
+		{&stmts.insertEmail, insertEmail},
+		{&stmts.insertRecipient, insertRecipient},
+	} {
+		if *p.stmt, err = tx.PrepareContext(ctx, p.query); err != nil {
+			return errors.Join(fmt.Errorf("prepare %q: %w", p.query, err), tx.Rollback())
+		}
+	}
+
+	s.tx, s.stmts = tx, stmts
+	return nil
 }
 
 func (s *Store) saveMessage(ctx context.Context, msg *eml.Message) (bool, error) {
@@ -190,7 +229,7 @@ func (s *Store) saveMessage(ctx context.Context, msg *eml.Message) (bool, error)
 		}
 	}
 
-	res, err := s.tx.ExecContext(ctx, insertEmail, msg.MessageID, msg.Date.UnixMilli(), fromID, msg.Hash())
+	res, err := s.stmts.insertEmail.ExecContext(ctx, msg.MessageID, msg.Date.UnixMilli(), fromID, msg.Hash())
 	if err != nil {
 		return false, fmt.Errorf("insert email: %w", err)
 	}
@@ -203,7 +242,7 @@ func (s *Store) saveMessage(ctx context.Context, msg *eml.Message) (bool, error)
 	}
 
 	for _, r := range recipients {
-		if _, err := s.tx.ExecContext(ctx, insertRecipient, emailID, r.userID, r.typ); err != nil {
+		if _, err := s.stmts.insertRecipient.ExecContext(ctx, emailID, r.userID, r.typ); err != nil {
 			return false, fmt.Errorf("insert recipient: %w", err)
 		}
 	}
@@ -217,7 +256,7 @@ func (s *Store) userID(ctx context.Context, msg *eml.Message, addr string) (int6
 	}
 
 	var id int64
-	if err := s.tx.QueryRowContext(ctx, upsertUser, addr, name).Scan(&id); err != nil {
+	if err := s.stmts.upsertUser.QueryRowContext(ctx, addr, name).Scan(&id); err != nil {
 		return 0, fmt.Errorf("upsert user %q: %w", addr, err)
 	}
 	s.users[addr] = cachedUser{id: id, named: name != ""}
@@ -240,7 +279,7 @@ func (s *Store) Flush() error {
 		return nil
 	}
 	err := s.tx.Commit()
-	s.tx = nil
+	s.tx, s.stmts = nil, txStmts{}
 	s.pending = 0
 	if err != nil {
 		s.forgetUsers(0)
