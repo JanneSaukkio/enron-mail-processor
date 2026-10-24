@@ -388,7 +388,9 @@ built-in tools.
 I created a subset TAR archive containin around 70k files from top three senders: `jeff.dasovich`, `kay.mann` and `sara.shackleton` and
 tasked Claude to write performance tests:
 
->Write a performance test that ingests test/perf-test-dataset.tar.gz archive. It has 3 user folders and 70k files.
+```
+Write a performance test that ingests test/perf-test-dataset.tar.gz archive. It has 3 user folders and 70k files.
+```
 
 Response:
 
@@ -434,12 +436,14 @@ order by sent desc;
 
 I instructed Claude to clean addresses in EML parser:
 
->Following email addresses should be cleaned in EML parser:
->1. `cater'.'john@enron.com` becomes `cater.john@enron.com` (replace `'.'` with dot)
->2. `e-mail <'.'john@enron.com>` becomes `.john@enron.com` (remove brackets and "e-mail" prefix)
->3. `<"fichter.john"@enron.com>` becomes `fichter.john@enron.com` (strip double quotes around username part)
->
->Write tests for these cases.
+```
+Following email addresses should be cleaned in EML parser:
+1. `cater'.'john@enron.com` becomes `cater.john@enron.com` (replace `'.'` with dot)
+2. `e-mail <'.'john@enron.com>` becomes `.john@enron.com` (remove brackets and "e-mail" prefix)
+3. `<"fichter.john"@enron.com>` becomes `fichter.john@enron.com` (strip double quotes around username part)
+
+Write tests for these cases.
+```
 
 There are most likely more email addresses that require cleanup but I don't have time to investigate further.
 
@@ -447,7 +451,9 @@ There are most likely more email addresses that require cleanup but I don't have
 
 Prompt:
 
->Cache IDs of inserted users by email in memory so that inserting rows to the email table doesn't need upsert users to the database.
+```
+Cache IDs of inserted users by email in memory so that inserting rows to the email table doesn't need upsert users to the database.
+```
 
 Response:
 
@@ -462,8 +468,10 @@ over 2 minutes.
 I noticed that in the `saveMessage` method of [sqlite.go](../internal/store/sqlite.go) recipients are inserted one-by-one to the table. This
 is slow for cases where there are tens of rows to be added. Instructing Claude to investigate and fix:
 
->Does gosqlite support batch inserts? It would be much efficient in cases where message has tens of recipients. If so use bulk inserts in
->`saveMessage` method when inserting recipients.
+```
+Does gosqlite support batch inserts? It would be much efficient in cases where message has tens of recipients. If so use bulk inserts in
+`saveMessage` method when inserting recipients.
+```
 
 My hunch was almost correct; bulk inserts are faster but Claude proposed using even better solution: prepared statements with single
 inserts. SQL statements are prepared at the start of the transaction and closed at the end.
@@ -487,10 +495,12 @@ Running whole dataset now takes less than 2 minutes.
 
 There might be chance to execute some of the ingestion work in parallel. Let Claude investigate:
 
->Modify the ingestion to run on multiple threads/goroutines to speed up the processing. SQLite supports multihreading out-of-the box but may
->require some logic on top.
->
->Compare time taken using performance tests. Currently it takes ~11 seconds to ingest the test dataset.
+```
+Modify the ingestion to run on multiple threads/goroutines to speed up the processing. SQLite supports multihreading out-of-the box but may
+require some logic on top.
+
+Compare time taken using performance tests. Currently it takes ~11 seconds to ingest the test dataset.
+```
 
 Response:
 
@@ -523,7 +533,9 @@ Ingestion results require 100.7 MiB of disk space, same amount of RAM is expecte
 
 Instructed Claude to modify the `--db` flag:
 
->Modify `db` flag so that it accepts string "memory" and when such value is given, SQLite database is in-memory.
+```
+Modify `db` flag so that it accepts string "memory" and when such value is given, SQLite database is in-memory.
+```
 
 Comparing RAM usages when idle and after the ingestion reveal what it costs to improve the ingestion speed by 41%.
 
@@ -544,4 +556,16 @@ ingestion take 34 seconds with in-memory database.
 
 Instructed Claude with following:
 
->Remove parsing and storing recipients all together from everywhere
+```
+Remove parsing and storing recipients all together from everywhere
+```
+
+
+## Final revision of the specification
+
+The [SPEC.md](../SPEC.md) has been updated to match final implementation. It doesn't contain all implementation details that are resolved
+while developing.
+
+Document for the [CODE_REVIEWER.md](../CODE_REVIEWER.md) has been written.
+
+As last thing formatting of these notes was unified.
