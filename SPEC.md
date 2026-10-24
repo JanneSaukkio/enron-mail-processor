@@ -77,19 +77,18 @@ Email contents are ignored. Headers were are interested in:
 | `Cc`                          | Optional comma-separated list of email addresses for carbon copies        |
 | `Bcc`                         | Optional comma-separated list of email addresses for blind carbon copies  |
 | `X-From`                      | Name of the sender (`From`)                                               |
-| `X-To`                        | Optional name of the receiver (`To`)                                      |
-| `X-cc`                        | Optional comma-separated list of `CC` names                               |
-| `X-bcc`                       | Optional comma-separated list of `BCC` names                              |
 
 Message file processing should simple have unit tests. Files to test can be found in `test/` directory.
 
+Email addresses should be normalized to be clean as possible to improve accuracy of sent messages.
 
 ## Command-line arguments
 
 - `path`: path to the archive file. Defaults `./enron_mail_20150507.tar.gz`.
 - `clean`: when `true`, the database schema is always reinitialized. Defaults to `false`.
 - `results`: when `true`, a `results.txt` file is printed after processing stops. Defaults `true`.
-
+- `db`: path to SQLite database or `memory` for in-memory database. Defaults to `enron.db`
+- `addr`: HTTP server address. Defaults to `:8080`.
 
 ## HTTP API endpoints
 
@@ -196,12 +195,6 @@ CREATE TABLE email (
     from_user_id INTEGER NOT NULL REFERENCES user (id),
     hash TEXT NOT NULL UNIQUE
 );
-
-CREATE TABLE recipient (
-    email_id INTEGER NOT NULL REFERENCES email (id),
-    user_id INTEGER NOT NULL REFERENCES user (id),
-    type TEXT -- either: null (direct), cc or bcc
-);
 ```
 
 
@@ -213,10 +206,9 @@ High level logic:
 2. List top-level folders of the archive
 3. Go through each folder one by one
 4. Recursively search for all files:
-    - Store user information to the `user` table. Ignore duplicates
+    - Store user information to the `user` table. Ignore duplicates, cache inserted user IDs in memory
     - Calculate hash from the message date, sender and recipients
     - Insert the message details with the hash to the `recipient` table using `INSERT OR IGNORE` statement
-    - If message was not ignored, insert one row per recipient to the `recipient` table referencing email and user
     - Increment files processed count
 5. Once all files have been ingested, set the processing end timestamp
 6. Write `results.txt`

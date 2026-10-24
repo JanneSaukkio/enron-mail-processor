@@ -3,12 +3,19 @@
 Reads the [Enron email dataset](https://www.cs.cmu.edu/~enron/) from a compressed TAR archive, stores message headers in SQLite
 and serves a list of senders ordered by the number of emails sent over an HTTP API. See [SPEC.md](SPEC.md) for details.
 
+**Reviewing the implementation?** Read [CODE_REVIEWER.md](./CODE_REVIEWER.md) first.
+
 ## Development
 
-Requires Go 1.27 or newer.
+Requires Go 1.27 or newer. Build binary with:
 
 ```sh
 go build -o ./dist/processor ./cmd/processor
+```
+
+Start the build processor binary:
+
+```sh
 ./dist/processor --path ./enron_mail_20150507.tar.gz
 ```
 
@@ -53,11 +60,8 @@ docker build -t enron-mail-processor .
 Run the container:
 
 ```sh
-docker run --rm -p 8080:8080 -v "$PWD/data:/data" enron-mail-processor --path /data/enron_mail_20150507.tar.gz
+./start.sh /path/to/enron_mail_20150507.tar.gz
 ```
-
-The container works in `/data`, so the database and `results.txt` end up in the mounted directory. The container runs as
-non-root (uid 65532), so the directory must be writable by that user.
 
 ## Parameters
 
