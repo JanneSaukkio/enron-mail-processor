@@ -2,3 +2,12 @@
 /docs/*.tar.gz
 /docs/maildir
 WORKLOG.md
+
+# Build artifact
+/dist
+
+# Runtime output
+*.db
+*.db-shm
+*.db-wal
+results.txt
