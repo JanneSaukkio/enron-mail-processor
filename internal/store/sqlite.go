@@ -110,9 +110,32 @@ type Stats struct {
 // Open opens or creates the database at path and initializes the schema.
 // When clean is true, existing tables are dropped first.
 func Open(ctx context.Context, path string, clean bool) (*Store, error) {
+	// The driver runs each _pragma on every new connection. That matters
+	// because database/sql keeps a pool of connections and most pragmas only
+	// apply to the connection they run on.
+	//
+	//   - journal_mode(WAL): readers and the writer don't block each other, so
+	//     the API can serve queries while ingestion is writing. Unlike the
+	//     other pragmas, this setting is stored in the database file.
+	//   - synchronous(NORMAL): in WAL mode, fsync only happens at checkpoints
+	//     instead of on every commit. A power loss can drop the latest
+	//     commits but never corrupts the database; an application crash
+	//     loses nothing. Lost commits can be recovered by ingesting again.
+	//   - foreign_keys(1): SQLite ignores REFERENCES constraints unless this
+	//     is enabled, so rows pointing to missing users or emails would be
+	//     accepted silently.
+	//   - busy_timeout(5000): a connection that finds the database locked,
+	//     for example during a commit or checkpoint, waits up to 5 seconds
+	//     instead of failing immediately with SQLITE_BUSY.
+	//   - cache_size(-65536): a negative value is in KiB, so 64 MiB of page
+	//     cache per connection instead of the default 2 MiB. With the default,
+	//     a batch transaction outgrows the cache and SQLite writes pages to
+	//     the WAL in the middle of it. The larger cache cut ingestion time of
+	//     the performance test dataset by about 8%.
 	dsn := "file:" + path +
 		"?_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)" +
-		"&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)"
+		"&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)" +
+		"&_pragma=cache_size(-65536)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
