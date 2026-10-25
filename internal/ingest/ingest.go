@@ -225,8 +225,7 @@ func (s *Service) save(r parsed) {
 // lost returns the number of messages that were counted as stored but were
 // lost with a failed batch commit. They are counted as errors instead.
 func lost(err error) int64 {
-	var ce *store.CommitError
-	if errors.As(err, &ce) {
+	if ce, ok := errors.AsType[*store.CommitError](err); ok {
 		return int64(ce.Lost)
 	}
 	return 0
