@@ -250,9 +250,9 @@ func (s *Service) writeResults(startedAt time.Time) error {
 	}
 
 	content := fmt.Sprintf(
-		"message_count: %d\nuser_count: %d\nsender_count: %d\nmessages_processed: %d\n"+
+		"message_count: %d\nsender_count: %d\nmessages_processed: %d\n"+
 			"processing_errors: %d\nduplicates_ignored: %d\ntime_took: %d\n",
-		stats.Messages, stats.Users, stats.Senders, s.processed.Load(),
+		stats.Messages, stats.Senders, s.processed.Load(),
 		s.errors.Load(), s.duplicates.Load(), time.Since(startedAt).Milliseconds())
 
 	return os.WriteFile(s.cfg.ResultsPath, []byte(content), 0o644)

@@ -93,7 +93,6 @@ type Sender struct {
 // Stats holds totals of the stored data.
 type Stats struct {
 	Messages int64
-	Users    int64
 	Senders  int64
 }
 
@@ -325,11 +324,8 @@ func (s *Store) TopSenders(ctx context.Context, limit, offset int) ([]Sender, in
 func (s *Store) Stats(ctx context.Context) (Stats, error) {
 	var st Stats
 	err := s.db.QueryRowContext(ctx, `
-		SELECT
-			(SELECT COUNT(*) FROM email),
-			(SELECT COUNT(*) FROM user),
-			(SELECT COUNT(DISTINCT from_user_id) FROM email)`).
-		Scan(&st.Messages, &st.Users, &st.Senders)
+		SELECT COUNT(*), COUNT(DISTINCT from_user_id) FROM email`).
+		Scan(&st.Messages, &st.Senders)
 	if err != nil {
 		return Stats{}, fmt.Errorf("query stats: %w", err)
 	}

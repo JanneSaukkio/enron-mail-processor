@@ -159,7 +159,6 @@ Example contents:
 
 ```
 message_count: 0
-user_count: 0
 sender_count: 0
 messages_processed: 0
 processing_errors: 0
@@ -169,8 +168,7 @@ time_took: 0
 
 Details:
 
-- `user_count` equals to number of unique users (senders and recipients) found and stored in database
-- `sender_count` equals to number of unique users have sent at least one email. There might be external recipients.
+- `sender_count` equals to number of unique users who have sent at least one email
 - `processing_errors` equals to number of message files failed to process
 - `duplicates_ignored` equals to number of duplicate files have been ignored
 - `time_took` equals to milliseconds it took from start of the processing to printing of this file
