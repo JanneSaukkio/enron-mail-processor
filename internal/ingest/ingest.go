@@ -4,6 +4,7 @@ package ingest
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -124,8 +125,11 @@ func (s *Service) run(startedAt time.Time) {
 	}()
 
 	err := s.ingest()
-	if flushErr := s.store.Flush(); flushErr != nil && err == nil {
-		err = flushErr
+	if flushErr := s.store.Flush(); flushErr != nil {
+		s.errors.Add(lost(flushErr))
+		if err == nil {
+			err = flushErr
+		}
 	}
 	if err != nil {
 		s.logger.Error("ingestion failed", "error", err)
@@ -211,11 +215,21 @@ func (s *Service) save(r parsed) {
 	inserted, err := s.store.SaveMessage(s.ctx, r.msg)
 	switch {
 	case err != nil:
-		s.errors.Add(1)
+		s.errors.Add(1 + lost(err))
 		s.logger.Warn("save message", "file", r.name, "error", err)
 	case !inserted:
 		s.duplicates.Add(1)
 	}
+}
+
+// lost returns the number of messages that were counted as stored but were
+// lost with a failed batch commit. They are counted as errors instead.
+func lost(err error) int64 {
+	var ce *store.CommitError
+	if errors.As(err, &ce) {
+		return int64(ce.Lost)
+	}
+	return 0
 }
 
 func (s *Service) finish(startedAt time.Time) {

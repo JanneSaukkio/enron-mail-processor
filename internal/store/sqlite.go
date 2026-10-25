@@ -56,6 +56,9 @@ type Store struct {
 	tx      *sql.Tx
 	stmts   txStmts
 	pending int
+	// inserted counts the messages in the current transaction that
+	// SaveMessage reported as inserted.
+	inserted int
 
 	// users caches user ids by email so that known users are not upserted
 	// again for every message.
@@ -95,6 +98,23 @@ type Stats struct {
 	Messages int64
 	Senders  int64
 }
+
+// CommitError reports a failed batch commit. The messages of the batch are no
+// longer stored, so callers that count inserted messages must correct their
+// counts.
+type CommitError struct {
+	// Lost is the number of messages in the batch that earlier SaveMessage
+	// calls reported as inserted. When the commit fails inside SaveMessage,
+	// the message being saved is not included, since its call fails.
+	Lost int
+	Err  error
+}
+
+func (e *CommitError) Error() string {
+	return fmt.Sprintf("commit: %d inserted messages lost: %v", e.Lost, e.Err)
+}
+
+func (e *CommitError) Unwrap() error { return e.Err }
 
 // Memory is the path that makes Open use an in-memory database. Its data is
 // lost when the Store is closed.
@@ -195,10 +215,16 @@ func (s *Store) SaveMessage(ctx context.Context, msg *eml.Message) (inserted boo
 	}
 
 	s.pending++
-	if s.pending >= batchSize {
-		if err := s.Flush(); err != nil {
-			return false, err
+	if s.pending < batchSize {
+		if inserted {
+			s.inserted++
 		}
+		return inserted, nil
+	}
+	// The message being saved is reported as failed if the commit fails, so
+	// it is not counted as lost.
+	if err := s.commit(s.inserted); err != nil {
+		return false, err
 	}
 	return inserted, nil
 }
@@ -270,17 +296,23 @@ func (s *Store) forgetUsers(mark int) {
 	s.uncommitted = s.uncommitted[:mark]
 }
 
-// Flush commits the current batch.
+// Flush commits the current batch. A failed commit returns a *CommitError.
 func (s *Store) Flush() error {
+	return s.commit(s.inserted)
+}
+
+// commit commits the current batch. On failure, lost is reported as the
+// number of lost messages.
+func (s *Store) commit(lost int) error {
 	if s.tx == nil {
 		return nil
 	}
 	err := s.tx.Commit()
 	s.tx, s.stmts = nil, txStmts{}
-	s.pending = 0
+	s.pending, s.inserted = 0, 0
 	if err != nil {
 		s.forgetUsers(0)
-		return fmt.Errorf("commit: %w", err)
+		return &CommitError{Lost: lost, Err: err}
 	}
 	s.uncommitted = s.uncommitted[:0]
 	return nil
