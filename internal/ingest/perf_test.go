@@ -30,22 +30,26 @@ func TestIngestPerformance(t *testing.T) {
 	files := countFiles(t)
 
 	for _, tt := range []struct {
-		name string
-		path string
+		name   string
+		memory bool
 	}{
-		{"disk", filepath.Join(tempDir, "perf.db")},
-		{"memory", store.Memory},
+		{"disk", false},
+		{"memory", true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			ingestPerf(t, files, tt.path, store.Options{Clean: true})
+			ingestPerf(t, files, tt.memory)
 		})
 	}
 }
 
-func ingestPerf(t *testing.T, files int64, path string, opts store.Options) {
+func ingestPerf(t *testing.T, files int64, memory bool) {
 	ctx := context.Background()
 	dir := t.TempDir()
-	st, err := store.Open(ctx, filepath.Join(dir, "perf.db"), true)
+	dbPath := filepath.Join(dir, "perf.db")
+	if memory {
+		dbPath = store.Memory
+	}
+	st, err := store.Open(ctx, dbPath, true)
 	if err != nil {
 		t.Fatal(err)
 	}
