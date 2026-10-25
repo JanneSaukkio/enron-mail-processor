@@ -236,7 +236,7 @@ func (s *Store) saveMessage(ctx context.Context, msg *eml.Message) (bool, error)
 		return false, err
 	}
 
-	res, err := s.stmts.insertEmail.ExecContext(ctx, msg.MessageID, msg.Date.UnixMilli(), fromID, msg.Hash())
+	res, err := s.stmts.insertEmail.ExecContext(ctx, msg.MessageID, msg.Date.UnixMilli(), fromID, msg.Hash)
 	if err != nil {
 		return false, fmt.Errorf("insert email: %w", err)
 	}

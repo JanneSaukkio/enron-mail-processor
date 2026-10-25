@@ -22,9 +22,10 @@ type Message struct {
 	// FromName is the display name of the sender from the X-From header, or
 	// empty when it is missing.
 	FromName string
-
-	// Recipients are only used to compute Hash.
-	to, cc, bcc []string
+	// Hash identifies the message by its sender, recipients and date. Two
+	// files with the same hash are considered duplicates. It is computed
+	// while parsing so that the recipients need not be kept.
+	Hash string
 }
 
 // Parse reads the headers of an EML message from r.
@@ -38,9 +39,6 @@ func Parse(r io.Reader) (*Message, error) {
 	msg := &Message{
 		MessageID: strings.TrimSpace(h.Get("Message-ID")),
 		FromName:  parseName(h.Get("X-From")),
-		to:        splitAddresses(h.Get("To")),
-		cc:        splitAddresses(h.Get("Cc")),
-		bcc:       splitAddresses(h.Get("Bcc")),
 	}
 	if msg.MessageID == "" {
 		return nil, errors.New("missing Message-ID header")
@@ -61,18 +59,23 @@ func Parse(r io.Reader) (*Message, error) {
 		return nil, fmt.Errorf("parse Date header: %w", err)
 	}
 
+	msg.Hash = hash(msg.From,
+		splitAddresses(h.Get("To")),
+		splitAddresses(h.Get("Cc")),
+		splitAddresses(h.Get("Bcc")),
+		msg.Date)
 	return msg, nil
 }
 
-// Hash identifies a message by its sender, recipients and date. Two files
-// with the same hash are considered duplicates.
-func (m *Message) Hash() string {
+// hash joins the sender, the recipient lists and the date in milliseconds
+// with "|" and returns the SHA-256 of the result in hex.
+func hash(from string, to, cc, bcc []string, date time.Time) string {
 	key := strings.Join([]string{
-		m.From,
-		strings.Join(m.to, ","),
-		strings.Join(m.cc, ","),
-		strings.Join(m.bcc, ","),
-		strconv.FormatInt(m.Date.UnixMilli(), 10),
+		from,
+		strings.Join(to, ","),
+		strings.Join(cc, ","),
+		strings.Join(bcc, ","),
+		strconv.FormatInt(date.UnixMilli(), 10),
 	}, "|")
 	sum := sha256.Sum256([]byte(key))
 	return hex.EncodeToString(sum[:])

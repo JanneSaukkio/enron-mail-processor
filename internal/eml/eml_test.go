@@ -1,9 +1,9 @@
 package eml
 
 import (
+	"net/mail"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -87,20 +87,41 @@ func TestParseFiles(t *testing.T) {
 			if msg.FromName != tt.fromName {
 				t.Errorf("FromName = %q, want %q", msg.FromName, tt.fromName)
 			}
-			if len(msg.to) != tt.toLen {
-				t.Fatalf("len(to) = %d, want %d", len(msg.to), tt.toLen)
+
+			to, cc, bcc := recipients(t, tt.file)
+			if len(to) != tt.toLen {
+				t.Fatalf("len(to) = %d, want %d", len(to), tt.toLen)
 			}
-			if msg.to[0] != tt.firstTo || msg.to[len(msg.to)-1] != tt.lastTo {
-				t.Errorf("to = [%q ... %q], want [%q ... %q]", msg.to[0], msg.to[len(msg.to)-1], tt.firstTo, tt.lastTo)
+			if to[0] != tt.firstTo || to[len(to)-1] != tt.lastTo {
+				t.Errorf("to = [%q ... %q], want [%q ... %q]", to[0], to[len(to)-1], tt.firstTo, tt.lastTo)
 			}
-			if len(msg.cc) != tt.ccLen {
-				t.Errorf("len(cc) = %d, want %d", len(msg.cc), tt.ccLen)
+			if len(cc) != tt.ccLen {
+				t.Errorf("len(cc) = %d, want %d", len(cc), tt.ccLen)
 			}
-			if len(msg.bcc) != tt.bccLen {
-				t.Errorf("len(bcc) = %d, want %d", len(msg.bcc), tt.bccLen)
+			if len(bcc) != tt.bccLen {
+				t.Errorf("len(bcc) = %d, want %d", len(bcc), tt.bccLen)
+			}
+			if want := hash(msg.From, to, cc, bcc, msg.Date); msg.Hash != want {
+				t.Errorf("Hash = %q, want %q", msg.Hash, want)
 			}
 		})
 	}
+}
+
+// recipients splits the recipient headers of a test file the way Parse does
+// before hashing them.
+func recipients(t *testing.T, name string) (to, cc, bcc []string) {
+	t.Helper()
+	f, err := os.Open(filepath.Join("..", "..", "test", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	m, err := mail.ReadMessage(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return splitAddresses(m.Header.Get("To")), splitAddresses(m.Header.Get("Cc")), splitAddresses(m.Header.Get("Bcc"))
 }
 
 func TestParseName(t *testing.T) {
@@ -163,14 +184,13 @@ func TestParseCleansAddresses(t *testing.T) {
 	if want := ".john@enron.com"; msg.From != want {
 		t.Errorf("From = %q, want %q", msg.From, want)
 	}
-	if want := []string{"cater.john@enron.com", ".john@enron.com"}; !slices.Equal(msg.to, want) {
-		t.Errorf("to = %q, want %q", msg.to, want)
-	}
-	if want := []string{"cater.john@enron.com"}; !slices.Equal(msg.cc, want) {
-		t.Errorf("cc = %q, want %q", msg.cc, want)
-	}
-	if want := []string{".john@enron.com"}; !slices.Equal(msg.bcc, want) {
-		t.Errorf("bcc = %q, want %q", msg.bcc, want)
+	want := hash(".john@enron.com",
+		[]string{"cater.john@enron.com", ".john@enron.com"},
+		[]string{"cater.john@enron.com"},
+		[]string{".john@enron.com"},
+		msg.Date)
+	if msg.Hash != want {
+		t.Errorf("Hash = %q, want hash of the cleaned addresses %q", msg.Hash, want)
 	}
 }
 
@@ -206,15 +226,15 @@ func TestHash(t *testing.T) {
 		return msg
 	}
 
-	h := parse(base).Hash()
+	h := parse(base).Hash
 	if len(h) != 64 {
-		t.Fatalf("Hash() length = %d, want 64", len(h))
+		t.Fatalf("Hash length = %d, want 64", len(h))
 	}
 
 	// Message-ID and display names are not part of the hash.
 	same := parse(strings.Replace(base, "<1@x>", "<2@x>", 1) + "X-From: A\n")
-	if same.Hash() != h {
-		t.Error("Hash() differs for messages with same sender, recipients and date")
+	if same.Hash != h {
+		t.Error("Hash differs for messages with same sender, recipients and date")
 	}
 
 	different := []string{
@@ -224,8 +244,8 @@ func TestHash(t *testing.T) {
 		base + "Bcc: c@enron.com\n",
 	}
 	for _, s := range different {
-		if parse(s).Hash() == h {
-			t.Errorf("Hash() equal for different message:\n%s", s)
+		if parse(s).Hash == h {
+			t.Errorf("Hash equal for different message:\n%s", s)
 		}
 	}
 }
