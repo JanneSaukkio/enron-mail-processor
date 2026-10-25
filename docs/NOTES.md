@@ -569,3 +569,20 @@ while developing.
 Document for the [CODE_REVIEWER.md](../CODE_REVIEWER.md) has been written.
 
 As last thing formatting of these notes was unified.
+
+
+## Final v2 touches
+
+After sleeping one night I deciced that Claude should review what has been written and fix issues I decided that are worth fixing. Things
+fixed:
+
+- Removed irrelevant `user_count` from `results.txt` because it always equals to `sender_count`
+- Fixed performance tests always using on disk database
+- Compute message hash immediately without storing recipients in memory. Didn't affect ingestion speed but may have affected the memory
+  usage slightly.
+- Fix cases where `From` header has `"Doe, John" <john@enron.com>` value by extracting only the address part
+- In case inserting messages to the database fail, failures are now counted towards processing errors
+
+I also came across [go fix](https://go.dev/blog/gofix) command while reading about Golang. It "fixed" one case with error type checking.
+
+The [CODE_REVIEWER.md](../CODE_REVIEWER.md) has been updated.
