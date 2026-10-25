@@ -4,6 +4,7 @@ import (
 	"net/mail"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -191,6 +192,41 @@ func TestParseCleansAddresses(t *testing.T) {
 		msg.Date)
 	if msg.Hash != want {
 		t.Errorf("Hash = %q, want hash of the cleaned addresses %q", msg.Hash, want)
+	}
+}
+
+func TestSplitAddresses(t *testing.T) {
+	tests := []struct {
+		in   string
+		want []string
+	}{
+		{"a@enron.com, b@enron.com", []string{"a@enron.com", "b@enron.com"}},
+		{`"Doe, John" <john@enron.com>`, []string{"john@enron.com"}},
+		{`"Doe, John" <john@enron.com>, "Roe, Jane" <jane@enron.com>`, []string{"john@enron.com", "jane@enron.com"}},
+		{`"fichter.john"@enron.com, a@enron.com`, []string{"fichter.john@enron.com", "a@enron.com"}},
+		{`"fichter.john@enron.com, a@enron.com`, []string{"fichter.john@enron.com", "a@enron.com"}},
+		{" , ,", nil},
+		{"", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			if got := splitAddresses(tt.in); !slices.Equal(got, tt.want) {
+				t.Errorf("splitAddresses(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseQuotedFromName(t *testing.T) {
+	const input = "Message-ID: <1@x>\nDate: Mon, 14 May 2001 16:39:00 -0700 (PDT)\n" +
+		"From: \"Doe, John\" <John.Doe@enron.com>\n\nbody\n"
+
+	msg, err := Parse(strings.NewReader(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "john.doe@enron.com"; msg.From != want {
+		t.Errorf("From = %q, want %q", msg.From, want)
 	}
 }
 

@@ -83,12 +83,36 @@ func hash(from string, to, cc, bcc []string, date time.Time) string {
 
 func splitAddresses(s string) []string {
 	var out []string
-	for _, part := range strings.Split(s, ",") {
+	for _, part := range splitList(s) {
 		if addr := cleanAddress(part); addr != "" {
 			out = append(out, addr)
 		}
 	}
 	return out
+}
+
+// splitList splits an address list on commas, except for commas inside a
+// quoted display name such as `"Doe, John" <john@enron.com>`. Mangled
+// addresses can leave a quote unbalanced, as in `"fichter.john@enron.com`,
+// and then s is split on every comma.
+func splitList(s string) []string {
+	var parts []string
+	quoted, start := false, 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '"':
+			quoted = !quoted
+		case ',':
+			if !quoted {
+				parts = append(parts, s[start:i])
+				start = i + 1
+			}
+		}
+	}
+	if quoted {
+		return strings.Split(s, ",")
+	}
+	return append(parts, s[start:])
 }
 
 // cleanAddress normalizes a single address. Some addresses in the dataset are
